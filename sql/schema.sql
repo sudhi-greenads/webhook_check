@@ -10,6 +10,11 @@ CREATE TABLE IF NOT EXISTS user_tokens (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   refresh_token_id VARCHAR(255) NOT NULL,
   access_token_id VARCHAR(255) NOT NULL,
+  user_agent TEXT,
+  ip VARCHAR(100),
+  flow_ips TEXT,
+  location JSONB,
+  last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -30,6 +35,9 @@ CREATE TABLE IF NOT EXISTS webhook_logs (
   headers JSONB NOT NULL,
   query JSONB NOT NULL,
   body JSONB NOT NULL,
+  ip VARCHAR(100),
+  flow_ips TEXT,
+  location JSONB,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (webhook_id) REFERENCES webhooks(id) ON DELETE CASCADE
 );

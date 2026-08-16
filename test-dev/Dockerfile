@@ -13,18 +13,19 @@ COPY server/package*.json ./
 RUN npm install --production
 COPY server/ ./
 
-# Stage 2: Production Image (Ubuntu)
+# Stage 3: Production Image (Ubuntu)
 FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /app
 
-# Install prerequisites, Node.js, Nginx, and PostgreSQL
+# Install prerequisites, Node.js, Nginx, PostgreSQL, and Redis
 RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
     gnupg \
     nginx \
+    redis-server \
     postgresql postgresql-contrib \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
@@ -70,5 +71,5 @@ EXPOSE 80
 ENV LOG_PATH=/logs/logs.txt
 ENV PORT=3000
 
-# Run the startup script (which launches Nginx and PM2)
+# Run the startup script (which launches PostgreSQL, Redis, Nginx and PM2)
 CMD ["/app/start.sh"]

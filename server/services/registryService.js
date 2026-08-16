@@ -4,12 +4,6 @@ const pool = require('../db');
 async function initializeDB() {
   const client = await pool.connect();
   try {
-    // Drop existing tables to apply the new schema with users
-    // COMMENTED OUT FOR PRODUCTION: We now handle schema initialization in Docker via schema.sql
-    // await client.query(`DROP TABLE IF EXISTS webhook_logs CASCADE;`);
-    // await client.query(`DROP TABLE IF EXISTS webhooks CASCADE;`);
-    // await client.query(`DROP TABLE IF EXISTS users CASCADE;`);
-
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
@@ -25,8 +19,22 @@ async function initializeDB() {
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         refresh_token_id VARCHAR(255) NOT NULL,
         access_token_id VARCHAR(255) NOT NULL,
+        user_agent TEXT,
+        ip VARCHAR(100),
+        flow_ips TEXT,
+        location JSONB,
+        last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
+    `);
+
+    // Ensure columns exist if table was already created
+    await client.query(`
+      ALTER TABLE user_tokens ADD COLUMN IF NOT EXISTS user_agent TEXT;
+      ALTER TABLE user_tokens ADD COLUMN IF NOT EXISTS ip VARCHAR(100);
+      ALTER TABLE user_tokens ADD COLUMN IF NOT EXISTS flow_ips TEXT;
+      ALTER TABLE user_tokens ADD COLUMN IF NOT EXISTS location JSONB;
+      ALTER TABLE user_tokens ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
     `);
 
     await client.query(`
@@ -49,11 +57,22 @@ async function initializeDB() {
         headers JSONB NOT NULL,
         query JSONB NOT NULL,
         body JSONB NOT NULL,
+        ip VARCHAR(100),
+        flow_ips TEXT,
+        location JSONB,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (webhook_id) REFERENCES webhooks(id) ON DELETE CASCADE
       )
     `);
-    console.log("PostgreSQL Database initialized with Auth schema.");
+
+    // Ensure columns exist on webhook_logs if table was already created
+    await client.query(`
+      ALTER TABLE webhook_logs ADD COLUMN IF NOT EXISTS ip VARCHAR(100);
+      ALTER TABLE webhook_logs ADD COLUMN IF NOT EXISTS flow_ips TEXT;
+      ALTER TABLE webhook_logs ADD COLUMN IF NOT EXISTS location JSONB;
+    `);
+
+    console.log("PostgreSQL Database initialized with Auth, Webhook & GeoIP schema.");
   } catch (err) {
     console.error("Failed to initialize PostgreSQL:", err);
   } finally {
@@ -114,7 +133,19 @@ async function verifyWebhook(name, key) {
 async function getAllWebhooks(userId, page = 1, limit = 10) {
   const offset = (page - 1) * limit;
   const res = await pool.query(
-    'SELECT id, name, key, created_at, COUNT(*) OVER() as total_count FROM webhooks WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
+    `SELECT 
+       w.id, 
+       w.name, 
+       w.key, 
+       w.created_at, 
+       COUNT(wl.id)::int AS log_count,
+       COUNT(*) OVER() AS total_count 
+     FROM webhooks w
+     LEFT JOIN webhook_logs wl ON wl.webhook_id = w.id
+     WHERE w.user_id = $1
+     GROUP BY w.id, w.name, w.key, w.created_at
+     ORDER BY w.created_at DESC 
+     LIMIT $2 OFFSET $3`,
     [userId, limit, offset]
   );
   
@@ -125,6 +156,14 @@ async function getAllWebhooks(userId, page = 1, limit = 10) {
   });
   
   return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+}
+
+async function getWebhookById(id, userId) {
+  const res = await pool.query(
+    'SELECT id, name, key, created_at FROM webhooks WHERE id = $1 AND user_id = $2',
+    [id, userId]
+  );
+  return res.rows[0] || null;
 }
 
 async function getWebhookOwner(webhookId) {
@@ -159,16 +198,20 @@ async function deleteWebhook(id, userId) {
 }
 
 // Logging Methods
-async function logWebhookEvent(webhookId, method, url, headers, query, body) {
+async function logWebhookEvent(webhookId, method, url, headers, query, body, ip = null, flow_ips = null, location = null) {
   const res = await pool.query(
-    'INSERT INTO webhook_logs (webhook_id, method, url, headers, query, body) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+    `INSERT INTO webhook_logs (webhook_id, method, url, headers, query, body, ip, flow_ips, location) 
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
     [
       webhookId,
       method,
       url,
       JSON.stringify(headers || {}),
       JSON.stringify(query || {}),
-      JSON.stringify(body || {})
+      JSON.stringify(body || {}),
+      ip || null,
+      flow_ips || null,
+      location ? JSON.stringify(location) : null
     ]
   );
   return res.rows[0].id;
@@ -185,7 +228,7 @@ async function getWebhookLogs(webhookId, filters = {}, page = 1, limit = 100) {
   }
 
   if (filters.search) {
-    sql += ` AND (headers::TEXT ILIKE $${paramIndex} OR body::TEXT ILIKE $${paramIndex} OR query::TEXT ILIKE $${paramIndex} OR url ILIKE $${paramIndex})`;
+    sql += ` AND (headers::TEXT ILIKE $${paramIndex} OR body::TEXT ILIKE $${paramIndex} OR query::TEXT ILIKE $${paramIndex} OR url ILIKE $${paramIndex} OR ip ILIKE $${paramIndex} OR location::TEXT ILIKE $${paramIndex})`;
     const searchStr = `%${filters.search}%`;
     params.push(searchStr);
     paramIndex++;
@@ -231,6 +274,7 @@ module.exports = {
   registerWebhook,
   verifyWebhook,
   getAllWebhooks,
+  getWebhookById,
   getWebhookOwner,
   getWebhookIdByNameKey,
   updateWebhook,

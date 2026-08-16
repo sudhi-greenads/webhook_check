@@ -1,8 +1,7 @@
 import { useEffect, useState, useCallback } from "react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Link } from "react-router-dom"
-import { Activity, Plus, Trash2, Edit2, Check, X, Copy } from "lucide-react"
+import { Link, useNavigate } from "react-router-dom"
+import { Activity, Plus, Trash2, Edit2, Copy, Radio, ExternalLink, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { apiFetch } from "../lib/api"
 import { PaginationControls } from "../components/PaginationControls"
@@ -12,6 +11,7 @@ type Webhook = {
   name: string
   key: string
   created_at: string
+  log_count?: number
 }
 
 export default function WebhooksList() {
@@ -24,10 +24,7 @@ export default function WebhooksList() {
   const [totalPages, setTotalPages] = useState(1)
   const limit = 10
 
-  // Editing state
-  const [editingId, setEditingId] = useState<number | null>(null)
-  const [editName, setEditName] = useState("")
-  const [editKey, setEditKey] = useState("")
+  const navigate = useNavigate()
 
   const fetchWebhooks = useCallback(async (currentPage: number) => {
     setLoading(true)
@@ -37,7 +34,7 @@ export default function WebhooksList() {
       const data = await res.json()
       if (data.data) {
         setWebhooks(data.data)
-        setTotalPages(data.totalPages)
+        setTotalPages(data.totalPages || 1)
       }
     } catch (e) {
       setErrorMsg("Failed to load webhooks.")
@@ -50,8 +47,8 @@ export default function WebhooksList() {
     fetchWebhooks(page)
   }, [page, fetchWebhooks])
 
-  const handleDelete = async (id: number) => {
-    if (!confirm("Are you sure you want to delete this webhook? All associated logs will be permanently removed.")) return
+  const handleDelete = async (id: number, name: string) => {
+    if (!confirm(`Are you sure you want to delete endpoint "${name}"? All associated logs will be permanently removed.`)) return
     
     try {
       const res = await apiFetch(`/webhooks/${id}`, { method: "DELETE" })
@@ -67,146 +64,172 @@ export default function WebhooksList() {
     }
   }
 
-  const startEditing = (wh: Webhook) => {
-    setEditingId(wh.id)
-    setEditName(wh.name)
-    setEditKey(wh.key)
-  }
-
-  const cancelEditing = () => {
-    setEditingId(null)
-    setEditName("")
-    setEditKey("")
-  }
-
-  const saveEdit = async (id: number) => {
-    try {
-      const res = await apiFetch(`/webhooks/${id}`, {
-        method: "PUT",
-        body: JSON.stringify({ name: editName, key: editKey })
-      })
-      const data = await res.json()
-      if (data.success) {
-        setEditingId(null)
-        toast.success("Webhook updated successfully")
-        fetchWebhooks(page)
-      } else {
-        toast.error(data.error || "Failed to update webhook")
-      }
-    } catch (e) {
-      toast.error("An error occurred while saving")
-    }
-  }
-
   const handleCopyEndpoint = (wh: Webhook) => {
     const backendUrl = import.meta.env.VITE_BACKEND_PUBLIC_URL || (window.location.origin + '/webhook')
-    const url = `${backendUrl}/${wh.name}/${wh.key}`
+    const url = `${backendUrl.replace(/\/$/, '')}/${wh.name}/${wh.key}`
     navigator.clipboard.writeText(url)
     toast.success("Endpoint URL copied to clipboard")
   }
 
   return (
     <div className="flex flex-col gap-6 pt-6 max-w-[1200px] mx-auto w-full">
+      {/* Top Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Endpoints</h1>
-          <p className="text-sm text-muted-foreground mt-2">
-            Manage your webhook listeners and routing endpoints.
+          <h1 className="text-3xl font-semibold tracking-tight text-foreground flex items-center gap-2.5">
+            <Radio className="h-7 w-7 text-primary" />
+            Endpoints
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1.5">
+            Manage your webhook listeners, capture real-time HTTP payloads, and inspect incoming requests.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => fetchWebhooks(page)} 
+            disabled={loading}
+            className="h-9 text-xs bg-background"
+          >
+            <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
           <Link to="/webhooks/create">
-            <Button>
-              <Plus className="mr-2 h-4 w-4" /> Create Endpoint
+            <Button size="sm" className="h-9 text-xs shadow-sm">
+              <Plus className="mr-1.5 h-4 w-4" /> Create Endpoint
             </Button>
           </Link>
         </div>
       </div>
       
-      {errorMsg && <div className="text-red-500 text-sm">{errorMsg}</div>}
+      {errorMsg && (
+        <div className="text-destructive text-xs font-medium bg-destructive/10 p-3 rounded-lg border border-destructive/20">
+          {errorMsg}
+        </div>
+      )}
 
-      <div className="rounded-lg border border-border bg-card shadow-sm">
+      {/* Endpoints Table Card */}
+      <div className="rounded-lg border border-border bg-card shadow-sm overflow-hidden">
         <div className="w-full overflow-auto">
           <table className="w-full caption-bottom text-sm">
-            <thead className="border-b border-border bg-muted/20">
+            <thead className="border-b border-border bg-muted/30">
               <tr className="text-left font-medium text-muted-foreground">
-                <th className="h-12 px-4 align-middle">Name</th>
-                <th className="h-12 px-4 align-middle">Key</th>
-                <th className="h-12 px-4 align-middle hidden md:table-cell">Created At</th>
-                <th className="h-12 px-4 align-middle text-right">Actions</th>
+                <th className="h-11 px-4 align-middle text-xs font-semibold uppercase tracking-wider">Endpoint Name</th>
+                <th className="h-11 px-4 align-middle text-xs font-semibold uppercase tracking-wider">Secret Key</th>
+                <th className="h-11 px-4 align-middle text-xs font-semibold uppercase tracking-wider text-center">Total Requests</th>
+                <th className="h-11 px-4 align-middle text-xs font-semibold uppercase tracking-wider hidden md:table-cell">Created At</th>
+                <th className="h-11 px-4 align-middle text-xs font-semibold uppercase tracking-wider text-right">Actions</th>
               </tr>
             </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={4} className="h-32 text-center text-sm text-muted-foreground">Loading endpoints...</td></tr>
+            <tbody className="divide-y divide-border/50">
+              {loading && webhooks.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="h-36 text-center text-sm text-muted-foreground">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground/50" />
+                      <span>Loading endpoints...</span>
+                    </div>
+                  </td>
+                </tr>
               ) : webhooks.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="h-48 text-center">
+                  <td colSpan={5} className="h-48 text-center">
                     <div className="flex flex-col items-center justify-center">
                       <Activity className="h-8 w-8 text-muted-foreground/30 mb-3" />
                       <p className="text-sm text-muted-foreground font-medium">No endpoints found.</p>
-                      <p className="text-xs text-muted-foreground/70 mt-1 mb-4">Create an endpoint to start capturing webhooks.</p>
+                      <p className="text-xs text-muted-foreground/70 mt-1 mb-4">Create your first endpoint to start capturing webhooks.</p>
                       <Link to="/webhooks/create">
-                        <Button variant="outline" size="sm">Create Endpoint</Button>
+                        <Button variant="outline" size="sm" className="text-xs">
+                          <Plus className="mr-1.5 h-3.5 w-3.5" /> Create Endpoint
+                        </Button>
                       </Link>
                     </div>
                   </td>
                 </tr>
               ) : (
                 webhooks.map((wh) => (
-                  <tr key={wh.id} className="border-b border-border/50 transition-colors hover:bg-muted/30 data-[state=selected]:bg-muted">
+                  <tr key={wh.id} className="transition-colors hover:bg-muted/30 group">
+                    {/* Name */}
                     <td className="p-4 align-middle font-medium">
-                      {editingId === wh.id ? (
-                        <Input value={editName} onChange={(e) => setEditName(e.target.value)} className="h-8 max-w-[200px] bg-background" />
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <Activity className="h-4 w-4 text-primary" />
-                          <Link to={`/logs/${wh.name}/${wh.key}`} className="hover:underline">
-                            {wh.name}
-                          </Link>
+                      <div className="flex items-center gap-2.5">
+                        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary shrink-0">
+                          <Activity className="h-3.5 w-3.5" />
                         </div>
-                      )}
+                        <Link 
+                          to={`/logs/${wh.name}/${wh.key}`} 
+                          className="hover:underline text-foreground font-semibold text-sm flex items-center gap-1.5"
+                          title="View endpoint logs"
+                        >
+                          /{wh.name}
+                        </Link>
+                      </div>
                     </td>
-                    <td className="p-3 align-middle font-mono text-xs max-w-[200px]">
-                      {editingId === wh.id ? (
-                        <Input value={editKey} onChange={(e) => setEditKey(e.target.value)} className="h-8 bg-background" />
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <span className="truncate">{wh.key}</span>
-                          <Button variant="ghost" size="icon" className="h-6 w-6 ml-auto shrink-0 opacity-50 hover:opacity-100" onClick={() => handleCopyEndpoint(wh)} title="Copy URL">
-                            <Copy className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      )}
+
+                    {/* Key with Copy button */}
+                    <td className="p-4 align-middle">
+                      <div className="flex items-center gap-2 max-w-[220px]">
+                        <span className="font-mono text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded border border-border truncate">
+                          {wh.key}
+                        </span>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground hover:bg-muted" 
+                          onClick={() => handleCopyEndpoint(wh)} 
+                          title="Copy Full Webhook URL"
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </td>
-                    <td className="p-4 align-middle text-muted-foreground hidden md:table-cell">
-                      {new Date(wh.created_at).toLocaleDateString()}
+
+                    {/* Total Requests / Log Count Badge */}
+                    <td className="p-4 align-middle text-center">
+                      <span className={`inline-flex items-center gap-1 font-mono text-xs font-semibold px-2.5 py-0.5 rounded-full border ${
+                        (wh.log_count ?? 0) > 0 
+                          ? 'bg-primary/10 text-primary border-primary/20' 
+                          : 'bg-muted text-muted-foreground border-border'
+                      }`}>
+                        {wh.log_count ?? 0} {wh.log_count === 1 ? 'log' : 'logs'}
+                      </span>
                     </td>
+
+                    {/* Created At */}
+                    <td className="p-4 align-middle text-muted-foreground text-xs hidden md:table-cell">
+                      {new Date(wh.created_at).toLocaleDateString(undefined, {
+                        month: 'short', day: 'numeric', year: 'numeric'
+                      })}
+                    </td>
+
+                    {/* Actions */}
                     <td className="p-4 align-middle text-right">
-                      {editingId === wh.id ? (
-                        <div className="flex items-center justify-end gap-2">
-                          <Button variant="ghost" size="icon" onClick={() => saveEdit(wh.id)} className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-100">
-                            <Check className="h-4 w-4" />
+                      <div className="flex items-center justify-end gap-1.5">
+                        <Link to={`/logs/${wh.name}/${wh.key}`}>
+                          <Button variant="secondary" size="sm" className="h-8 px-2.5 text-xs gap-1">
+                            <ExternalLink className="h-3 w-3" />
+                            View Logs
                           </Button>
-                          <Button variant="ghost" size="icon" onClick={cancelEditing} className="h-8 w-8 text-muted-foreground">
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity [&:hover]:opacity-100" style={{opacity: 1}}>
-                          <Link to={`/logs/${wh.name}/${wh.key}`}>
-                            <Button variant="ghost" size="sm" className="h-8 px-2 text-xs">
-                              View Logs
-                            </Button>
-                          </Link>
-                          <Button variant="ghost" size="icon" onClick={() => startEditing(wh)} className="h-8 w-8">
-                            <Edit2 className="h-4 w-4 text-muted-foreground" />
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDelete(wh.id)} className="h-8 w-8 hover:text-destructive">
-                            <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
-                          </Button>
-                        </div>
-                      )}
+                        </Link>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          onClick={() => navigate(`/webhooks/${wh.id}/edit`)} 
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                          title="Edit Endpoint"
+                        >
+                          <Edit2 className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          onClick={() => handleDelete(wh.id, wh.name)} 
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                          title="Delete Endpoint"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -215,11 +238,15 @@ export default function WebhooksList() {
           </table>
         </div>
         
-        <PaginationControls 
-          page={page} 
-          totalPages={totalPages} 
-          onPageChange={setPage} 
-        />
+        {webhooks.length > 0 && (
+          <div className="border-t border-border bg-muted/20 px-4 py-2">
+            <PaginationControls 
+              page={page} 
+              totalPages={totalPages} 
+              onPageChange={setPage} 
+            />
+          </div>
+        )}
       </div>
     </div>
   )
