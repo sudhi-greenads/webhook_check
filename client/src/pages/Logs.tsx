@@ -16,7 +16,12 @@ import {
   MapPin, 
   Network, 
   Clock, 
-  Server
+  Server,
+  Lock,
+  Unlock,
+  ShieldCheck,
+  ShieldAlert,
+  Send
 } from "lucide-react"
 import { toast } from "sonner"
 import { apiFetch } from "../lib/api"
@@ -46,11 +51,15 @@ type WebhookLog = {
   ip?: string | null
   flow_ips?: string | null
   location?: LocationData | null
+  auth_status?: string | null // 'verified', 'failed', 'none'
+  response_status?: number | null
+  response_body?: any | null
   created_at: string
 }
 
 export default function Logs() {
-  const { name, key } = useParams()
+  const { name, key } = useParams<{ name: string; key: string }>()
+  const { confirm } = useConfirm()
   const [logs, setLogs] = useState<WebhookLog[]>([])
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState("")
@@ -59,6 +68,7 @@ export default function Logs() {
   // Filters
   const [search, setSearch] = useState("")
   const [method, setMethod] = useState("ALL")
+  const [authStatusFilter, setAuthStatusFilter] = useState("ALL")
   const [limit] = useState("20")
   
   // Pagination
@@ -73,6 +83,7 @@ export default function Logs() {
       const params = new URLSearchParams()
       if (search) params.append("search", search)
       if (method && method !== "ALL") params.append("method", method)
+      if (authStatusFilter && authStatusFilter !== "ALL") params.append("authStatus", authStatusFilter)
       params.append("limit", limit)
       params.append("page", page.toString())
 
@@ -95,10 +106,16 @@ export default function Logs() {
     } finally {
       setLoading(false)
     }
-  }, [name, key, search, method, limit, page])
+  }, [name, key, search, method, authStatusFilter, limit, page])
 
   const clearLogs = async () => {
-    if (!confirm("Are you sure you want to clear all logs for this webhook?")) return
+    const confirmed = await confirm({
+      title: "Clear Webhook Logs",
+      description: "Are you sure you want to permanently delete all captured logs for this endpoint? This action cannot be undone.",
+      confirmText: "Clear All Logs",
+      variant: "destructive"
+    })
+    if (!confirmed) return
     try {
       await apiFetch(`/log/${name}/${key}`, { method: "DELETE" })
       toast.success("Logs cleared successfully")
@@ -128,6 +145,54 @@ export default function Logs() {
     } catch (err) {
       toast.error("Failed to copy URL")
     }
+  }
+
+  const getResponseBadge = (status: number | null | undefined) => {
+    const code = status || 200
+    if (code >= 200 && code < 300) {
+      return (
+        <span className="font-mono font-bold text-[11px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+          {code} OK
+        </span>
+      )
+    }
+    if (code === 401) {
+      return (
+        <span className="font-mono font-bold text-[11px] px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20">
+          401 Unauthorized
+        </span>
+      )
+    }
+    return (
+      <span className="font-mono font-bold text-[11px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+        {code}
+      </span>
+    )
+  }
+
+  const getAuthBadge = (authStatus: string | null | undefined) => {
+    if (authStatus === 'verified') {
+      return (
+        <span className="inline-flex items-center gap-1 font-mono text-[11px] px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
+          <ShieldCheck className="h-3 w-3" />
+          Verified JWT
+        </span>
+      )
+    }
+    if (authStatus === 'failed') {
+      return (
+        <span className="inline-flex items-center gap-1 font-mono text-[11px] px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20">
+          <ShieldAlert className="h-3 w-3" />
+          Auth Failed
+        </span>
+      )
+    }
+    return (
+      <span className="inline-flex items-center gap-1 font-mono text-[11px] px-2 py-0.5 rounded bg-muted text-muted-foreground border border-border">
+        <Unlock className="h-3 w-3" />
+        Public
+      </span>
+    )
   }
 
   return (
@@ -177,11 +242,11 @@ export default function Logs() {
         
         {/* Toolbar */}
         <div className="flex flex-col md:flex-row items-center justify-between gap-3 p-3 bg-muted/30 border-b border-border">
-          <div className="flex items-center gap-3 w-full md:w-auto">
-            <div className="relative w-full md:w-64">
+          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+            <div className="relative w-full md:w-56">
               <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
               <Input 
-                placeholder="Search payload, IP, headers..." 
+                placeholder="Search payload, response, IP..." 
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={(e) => {
@@ -193,8 +258,9 @@ export default function Logs() {
                 className="h-8 pl-8 text-xs bg-background"
               />
             </div>
+
             <Select value={method} onValueChange={(val: string) => { setMethod(val); setPage(1); }}>
-              <SelectTrigger className="h-8 w-[120px] text-xs bg-background">
+              <SelectTrigger className="h-8 w-[110px] text-xs bg-background">
                 <SelectValue placeholder="Method" />
               </SelectTrigger>
               <SelectContent>
@@ -206,6 +272,19 @@ export default function Logs() {
                 <SelectItem value="PATCH" className="text-xs">PATCH</SelectItem>
               </SelectContent>
             </Select>
+
+            <Select value={authStatusFilter} onValueChange={(val: string) => { setAuthStatusFilter(val); setPage(1); }}>
+              <SelectTrigger className="h-8 w-[130px] text-xs bg-background">
+                <SelectValue placeholder="Auth Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL" className="text-xs">All Auth States</SelectItem>
+                <SelectItem value="VERIFIED" className="text-xs">Verified JWT</SelectItem>
+                <SelectItem value="FAILED" className="text-xs">Auth Failed</SelectItem>
+                <SelectItem value="NONE" className="text-xs">Public / None</SelectItem>
+              </SelectContent>
+            </Select>
+
             <Button onClick={() => { setPage(1); fetchLogs() }} variant="secondary" size="sm" className="h-8 text-xs">
               Apply
             </Button>
@@ -250,7 +329,7 @@ export default function Logs() {
                   return (
                     <AccordionItem value={`log-${log.id}`} key={log.id} className="border-b-0">
                       <AccordionTrigger className="hover:no-underline hover:bg-muted/30 px-4 py-3 flex group transition-colors data-[state=open]:bg-muted/50">
-                        <div className="flex flex-wrap items-center gap-3 w-full text-left">
+                        <div className="flex flex-wrap items-center gap-2.5 w-full text-left">
                           {/* Method Badge */}
                           <span className={`font-mono font-bold text-[11px] px-2.5 py-0.5 rounded ${
                             log.method === 'POST' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' :
@@ -261,6 +340,12 @@ export default function Logs() {
                           }`}>
                             {log.method}
                           </span>
+
+                          {/* Response Status Badge */}
+                          {getResponseBadge(log.response_status)}
+
+                          {/* Auth Status Badge */}
+                          {getAuthBadge(log.auth_status)}
 
                           {/* Client IP Badge */}
                           {log.ip && (
@@ -279,7 +364,7 @@ export default function Logs() {
                           )}
 
                           {/* URL Path */}
-                          <span className="text-xs font-mono text-muted-foreground truncate max-w-[260px] hidden md:inline">
+                          <span className="text-xs font-mono text-muted-foreground truncate max-w-[200px] hidden md:inline">
                             {log.url}
                           </span>
 
@@ -295,6 +380,36 @@ export default function Logs() {
                       
                       <AccordionContent className="bg-muted/10 border-t border-border/50 p-4">
                         <div className="space-y-4">
+                          
+                          {/* Response Summary Panel */}
+                          <div className="rounded-lg border border-border bg-card p-4">
+                            <div className="flex items-center justify-between mb-3 pb-2 border-b border-border/50">
+                              <div className="flex items-center gap-2">
+                                <Send className="h-4 w-4 text-primary" />
+                                <span className="text-xs font-bold uppercase tracking-wider text-foreground">
+                                  HTTP Server Response Given
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {getResponseBadge(log.response_status)}
+                                {getAuthBadge(log.auth_status)}
+                              </div>
+                            </div>
+                            
+                            <div className="space-y-2">
+                              <span className="text-[11px] text-muted-foreground font-medium block">
+                                Response Body Returned to Sender:
+                              </span>
+                              <div className="font-mono text-xs bg-black/90 p-3 rounded-md border border-border text-foreground select-all overflow-x-auto">
+                                <pre className="whitespace-pre-wrap">
+                                  {typeof log.response_body === 'object'
+                                    ? JSON.stringify(log.response_body, null, 2)
+                                    : (log.response_body || 'ok')}
+                                </pre>
+                              </div>
+                            </div>
+                          </div>
+
                           {/* Client & GeoLocation Summary Card */}
                           <div className="rounded-lg border border-border bg-card p-4">
                             <div className="flex items-center gap-2 mb-3 pb-2 border-b border-border/50">
@@ -355,16 +470,17 @@ export default function Logs() {
                           {/* JSON Viewers Grid */}
                           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                             <div className="space-y-4">
-                              <CodeViewer title="Query Parameters" code={log.query} />
                               <CodeViewer title="Request Headers" code={log.headers} />
+                              <CodeViewer title="Query Parameters" code={log.query} />
                             </div>
                             <div className="space-y-4">
-                              <CodeViewer title="Request Body" code={log.body} />
+                              <CodeViewer title="Request Body Payload" code={log.body} />
                               {log.location && (
                                 <CodeViewer title="GeoLocation Metadata" code={log.location} />
                               )}
                             </div>
                           </div>
+
                         </div>
                       </AccordionContent>
                     </AccordionItem>
