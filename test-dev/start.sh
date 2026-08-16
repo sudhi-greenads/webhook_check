@@ -8,6 +8,12 @@ echo "Starting PostgreSQL server..."
 service postgresql start
 sleep 2
 
+# Start Redis if installed
+if command -v redis-server > /dev/null 2>&1; then
+    echo "Starting Redis server..."
+    service redis-server start || redis-server --daemonize yes
+fi
+
 # Start Nginx
 echo "Testing Nginx configuration..."
 nginx -t || { echo "Nginx syntax check failed:"; cat /var/log/nginx/error.log; }

@@ -13,6 +13,9 @@ async function authMiddleware(req, res, next) {
         const result = await TokenService.verifyToken(token, 'access');
         if (result.success) {
             req.user = result.user;
+            req.tokenId = result.tokenId;
+            req.refreshTokenId = result.refreshTokenId;
+            req.sessionDbId = result.sessionDbId;
             next();
         } else {
             res.status(401).json({ error: 'Unauthorized: Invalid token' });

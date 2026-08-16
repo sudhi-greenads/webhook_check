@@ -29,23 +29,32 @@ class TokenService {
         return token;
     }
 
-    async generateTokens(user) {
+    async generateTokens(user, { userAgent = null, ip = null, flow_ips = null, location = null } = {}) {
         const refreshTokenId = this.generateRefreshTokenId();
         const accessTokenId = this.generateAccessTokenId();
 
         const refreshToken = this.generateRefreshToken(user, refreshTokenId);
         const accessToken = this.generateAccessToken(user, refreshTokenId, accessTokenId);
 
-        // Store token relationship in DB
+        // Store token relationship & session metadata in DB
         await this.db.query(
-            'INSERT INTO user_tokens (user_id, refresh_token_id, access_token_id) VALUES ($1, $2, $3)',
-            [user.id, refreshTokenId, accessTokenId]
+            `INSERT INTO user_tokens (user_id, refresh_token_id, access_token_id, user_agent, ip, flow_ips, location, last_used_at) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)`,
+            [
+                user.id,
+                refreshTokenId,
+                accessTokenId,
+                userAgent || null,
+                ip || null,
+                flow_ips || null,
+                location ? JSON.stringify(location) : null
+            ]
         );
 
         return { refreshToken, accessToken };
     }
 
-    async regenerateAccessToken(refreshToken) {
+    async regenerateAccessToken(refreshToken, { userAgent = null, ip = null, flow_ips = null, location = null } = {}) {
         // 1. Verify the refresh token
         const result = await this.verifyToken(refreshToken, 'refresh');
         if (!result.success) {
@@ -62,8 +71,22 @@ class TokenService {
 
         // 3. Update DB
         await this.db.query(
-            'UPDATE user_tokens SET access_token_id = $1 WHERE refresh_token_id = $2',
-            [newAccessTokenId, refreshTokenId]
+            `UPDATE user_tokens 
+             SET access_token_id = $1, 
+                 last_used_at = CURRENT_TIMESTAMP,
+                 user_agent = COALESCE($3, user_agent),
+                 ip = COALESCE($4, ip),
+                 flow_ips = COALESCE($5, flow_ips),
+                 location = COALESCE($6, location)
+             WHERE refresh_token_id = $2`,
+            [
+                newAccessTokenId, 
+                refreshTokenId,
+                userAgent || null,
+                ip || null,
+                flow_ips || null,
+                location ? JSON.stringify(location) : null
+            ]
         );
 
         return { accessToken: newAccessToken };
@@ -106,11 +129,54 @@ class TokenService {
                 throw new Error(`Token type ${tokenType} not supported`);
             }
 
-            return { success: true, message: `${tokenType} token is valid`, user };
+            return { 
+                success: true, 
+                message: `${tokenType} token is valid`, 
+                user,
+                tokenId: decoded.id,
+                refreshTokenId: decoded.refreshTokenId || decoded.id,
+                sessionDbId: dbUserToken.id
+            };
         } catch (err) {
             this.logger.error("Error occurred while verifying token:", err.message);
             throw new Error(err.message || "Invalid or expired token");
         }
+    }
+
+    // Devices & Active Sessions Management
+    async getUserDevices(userId) {
+        const res = await this.db.query(
+            `SELECT id, refresh_token_id, access_token_id, user_agent, ip, flow_ips, location, created_at, last_used_at 
+             FROM user_tokens 
+             WHERE user_id = $1 
+             ORDER BY last_used_at DESC, created_at DESC`,
+            [userId]
+        );
+        return res.rows;
+    }
+
+    async revokeDevice(userId, tokenId) {
+        const res = await this.db.query(
+            'DELETE FROM user_tokens WHERE id = $1 AND user_id = $2 RETURNING id',
+            [tokenId, userId]
+        );
+        return res.rows.length > 0;
+    }
+
+    async revokeOtherDevices(userId, currentRefreshTokenId) {
+        const res = await this.db.query(
+            'DELETE FROM user_tokens WHERE user_id = $1 AND refresh_token_id != $2 RETURNING id',
+            [userId, currentRefreshTokenId]
+        );
+        return res.rows.length;
+    }
+
+    async revokeAllDevices(userId) {
+        const res = await this.db.query(
+            'DELETE FROM user_tokens WHERE user_id = $1 RETURNING id',
+            [userId]
+        );
+        return res.rows.length;
     }
 }
 
