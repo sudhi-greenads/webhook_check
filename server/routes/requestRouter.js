@@ -1,5 +1,7 @@
 const express = require('express');
 const { verifyWebhook, logWebhookEvent } = require('../services/registryService');
+const geoIpService = require('../services/geoIpService');
+const { getClientIp, getFlowIps } = require('../utils/ipUtil');
 const router = express.Router();
 
 router.all('/:name/:key', async (req, res) => {
@@ -11,19 +13,34 @@ router.all('/:name/:key', async (req, res) => {
       return res.status(404).json({ error: 'Webhook not registered' });
     }
 
-    // Log the request payload to SQLite
+    // Extract client IP and flow IPs
+    const ip = getClientIp(req);
+    const flow_ips = getFlowIps(req);
+
+    // Non-blocking location lookup
+    let location = null;
+    try {
+      location = await geoIpService.lookupIp(ip);
+    } catch (e) {
+      // Ignore error
+    }
+
+    // Log the request payload and network metadata to PostgreSQL
     await logWebhookEvent(
       webhookId,
       req.method,
       req.originalUrl,
       req.headers,
       req.query,
-      req.body
+      req.body,
+      ip,
+      flow_ips,
+      location
     );
 
     res.send('ok');
   } catch (err) {
-    console.error(err);
+    console.error('Webhook processing error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

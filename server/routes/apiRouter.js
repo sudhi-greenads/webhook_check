@@ -2,6 +2,7 @@ const express = require('express');
 const { 
   registerWebhook, 
   getAllWebhooks, 
+  getWebhookById,
   verifyWebhook,
   getWebhookLogs,
   clearWebhookLogs,
@@ -9,12 +10,14 @@ const {
   deleteWebhook
 } = require('../services/registryService');
 const authMiddleware = require('../utils/authMiddleware');
+const { apiRateLimiter } = require('../utils/rateLimiter');
 
 const router = express.Router();
 
-// Apply auth middleware to all routes in this router individually so we don't block requestRouter
+// Apply api rate limiter
+router.use(apiRateLimiter);
 
-// Get all registered webhooks (paginated)
+// Get all registered webhooks (paginated, with log counts)
 router.get('/webhooks', authMiddleware, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -23,6 +26,19 @@ router.get('/webhooks', authMiddleware, async (req, res) => {
     res.json(webhooks);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch webhooks' });
+  }
+});
+
+// Get a single webhook by ID (for edit page)
+router.get('/webhooks/:id', authMiddleware, async (req, res) => {
+  try {
+    const webhook = await getWebhookById(req.params.id, req.user.id);
+    if (!webhook) {
+      return res.status(404).json({ error: 'Webhook not found' });
+    }
+    res.json({ success: true, webhook });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch webhook' });
   }
 });
 
@@ -57,7 +73,7 @@ router.put('/webhooks/:id', authMiddleware, async (req, res) => {
     }
     res.json({ success: true, webhook: result.webhook });
   } catch (err) {
-    if (err.message.includes('unauthorized')) return res.status(403).json({ error: 'Forbidden' });
+    if (err.message && err.message.includes('unauthorized')) return res.status(403).json({ error: 'Forbidden' });
     res.status(500).json({ error: 'Failed to update webhook' });
   }
 });

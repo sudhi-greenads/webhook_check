@@ -5,17 +5,23 @@ const cors = require('cors');
 const { initializeDB } = require('./services/registryService');
 const { cleanupOldLogs } = require('./utils/cleanup');
 const loggerMiddleware = require('./utils/loggerMiddleware');
+const authRouter = require('./routes/authRouter');
+const apiRouter = require('./routes/apiRouter');
+const requestRouter = require('./routes/requestRouter');
 
 async function startServer() {
   try {
     // 1. Wait for database to initialize before doing anything else
     await initializeDB();
-    
+
     // 2. Run initial cleanup and schedule daily
     cleanupOldLogs();
     setInterval(cleanupOldLogs, 24 * 60 * 60 * 1000);
 
     const app = express();
+
+    // Enable trust proxy for accurate IP determination behind reverse proxies (Nginx, Render, Cloudflare)
+    app.set('trust proxy', true);
 
     // 3. Configure CORS to allow all origins
     app.use(cors());
@@ -26,13 +32,11 @@ async function startServer() {
     app.use(loggerMiddleware);
 
     // 4. Mount API Routes
-    const authRouter = require('./routes/authRouter');
-    const apiRouter = require('./routes/apiRouter');
+
     app.use('/auth', authRouter);
     app.use('/', apiRouter);
 
     // 5. Catch Webhook Requests
-    const requestRouter = require('./routes/requestRouter');
     app.use('/webhook', requestRouter);
 
     const PORT = process.env.PORT || 3000;
