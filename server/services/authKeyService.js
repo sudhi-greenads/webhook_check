@@ -276,9 +276,9 @@ class AuthKeyService {
   }
 
   /**
-   * Verify an incoming JWT token against a stored Auth Key.
+   * Verify an incoming JWT token against a stored Auth Key and optional target webhook ID.
    */
-  verifyWebhookJwt(authKey, token) {
+  verifyWebhookJwt(authKey, token, expectedWebhookId = null) {
     if (!authKey) {
       return { valid: false, error: 'Auth key configuration missing', code: 'KEY_NOT_FOUND' };
     }
@@ -296,6 +296,19 @@ class AuthKeyService {
       const decoded = jwt.verify(token, authKey.public_key, {
         algorithms: ['RS256']
       });
+
+      // If token specifies an issuer_id / webhook_id / sub, and target webhook ID is provided, verify match
+      const tokenIssuerId = decoded.issuer_id ?? decoded.webhook_id ?? (decoded.sub && !isNaN(Number(decoded.sub)) ? Number(decoded.sub) : decoded.sub);
+      if (expectedWebhookId !== null && expectedWebhookId !== undefined && tokenIssuerId !== undefined && tokenIssuerId !== null) {
+        if (String(tokenIssuerId) !== String(expectedWebhookId)) {
+          return {
+            valid: false,
+            error: `Token issuer_id (${tokenIssuerId}) does not match destination webhook ID (${expectedWebhookId})`,
+            code: 'ISSUER_ID_MISMATCH'
+          };
+        }
+      }
+
       return { valid: true, payload: decoded };
     } catch (err) {
       return { valid: false, error: `Invalid token signature: ${err.message}`, code: 'INVALID_SIGNATURE' };
@@ -404,6 +417,7 @@ class AuthKeyService {
       issued_at_readable: payload.iat ? new Date(payload.iat * 1000).toLocaleString() : 'Not specified',
       expires_at_readable: payload.exp ? new Date(payload.exp * 1000).toLocaleString() : 'Never (No exp claim)',
       issuer: payload.iss || 'Not specified',
+      issuer_id: payload.issuer_id ?? payload.webhook_id ?? payload.sub ?? 'Not specified',
       audience: payload.aud || 'Not specified'
     };
 

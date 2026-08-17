@@ -14,7 +14,13 @@ This guide explains how to secure your webhook endpoints using asymmetric crypto
             │                                                           │
             │  1. Sign JWT with Private Key (RS256)                     │
             │     Header: { "alg": "RS256", "typ": "JWT" }              │
-            │     Payload: { "iss": "app", "exp": 1700000300 }          │
+            │     Payload: {                                            │
+            │       "iss": "webhook-sender-app",                        │
+            │       "issuer_id": 12, // Same as webhook ID              │
+            │       "aud": "webhook-service",                           │
+            │       "exp": 1700000300,                                  │
+            │       "iat": 1700000000                                   │
+            │     }                                                     │
             │                                                           │
             │  2. HTTP POST /webhook/:name/:key                         │
             │     Header: Authorization: Bearer <jwt_token>             │
@@ -32,6 +38,7 @@ This guide explains how to secure your webhook endpoints using asymmetric crypto
 - **Private Key Security**: When generating a key pair, the **Private Key is never stored in the database** and is shown/downloaded only once. Senders use this private key to sign JWTs.
 - **Public Key Verification**: The server stores only the **Public Key** in PostgreSQL and verifies the signature on incoming requests using `RS256`.
 - **1-to-Many Linking**: A single Auth Key can protect multiple webhook listeners, or endpoints can remain public (`No Auth`).
+- **Destination Webhook Binding**: The payload includes `issuer_id` (same as the target webhook ID) to ensure tokens cannot be reused across different endpoints.
 
 ---
 
@@ -67,14 +74,16 @@ const jwt = require('jsonwebtoken');
 
 // Load private key
 const privateKey = fs.readFileSync('private_key.pem', 'utf8');
+const webhookId = 12; // Same as your target webhook ID
 
 // Generate RS256 token (5 minutes validity)
 const token = jwt.sign(
   {
-    iss: 'my-sender-service',
-    aud: 'webhook-service',
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 300
+    iss: 'webhook-sender-app',               // Webhook sender app identifier
+    issuer_id: webhookId,                    // Same as target webhook ID (e.g. 12)
+    aud: 'webhook-service',                  // Target audience
+    iat: Math.floor(Date.now() / 1000),      // Issued timestamp
+    exp: Math.floor(Date.now() / 1000) + 300 // 5 minutes validity
   },
   privateKey,
   { algorithm: 'RS256' }
@@ -123,13 +132,16 @@ import jwt
 with open("private_key.pem", "r") as f:
     private_key = f.read()
 
+webhook_id = 12  # Same as your target webhook ID
+
 # Build claims
 now = int(time.time())
 claims = {
-    "iss": "my-python-app",
+    "iss": "webhook-sender-app",  # Webhook sender app identifier
+    "issuer_id": webhook_id,      # Same as target webhook ID (e.g. 12)
     "aud": "webhook-service",
     "iat": now,
-    "exp": now + 300 # 5 minutes expiration
+    "exp": now + 300              # 5 minutes expiration
 }
 
 # Sign JWT with RS256
@@ -156,9 +168,13 @@ print(f"Status: {response.status_code}, Response: {response.text}")
 ### C. cURL / Bash
 
 ```bash
+#!/usr/bin/env bash
+
+WEBHOOK_ID=12 # Same as your target webhook ID
+
 # 1. Base64 URL-safe encode header & payload
 HEADER=$(echo -n '{"alg":"RS256","typ":"JWT"}' | openssl base64 -e | tr -d '=' | tr '/+' '_-' | tr -d '\n')
-PAYLOAD=$(echo -n '{"iss":"cli","exp":'$(( $(date +%s) + 300 ))'}' | openssl base64 -e | tr -d '=' | tr '/+' '_-' | tr -d '\n')
+PAYLOAD=$(echo -n '{"iss":"webhook-sender-app","issuer_id":'$WEBHOOK_ID',"aud":"webhook-service","exp":'$(( $(date +%s) + 300 ))'}' | openssl base64 -e | tr -d '=' | tr '/+' '_-' | tr -d '\n')
 
 # 2. Sign with OpenSSL
 SIGNATURE=$(echo -n "${HEADER}.${PAYLOAD}" | openssl dgst -sha256 -sign private_key.pem | openssl base64 -e | tr -d '=' | tr '/+' '_-' | tr -d '\n')
@@ -187,12 +203,14 @@ require_once 'vendor/autoload.php';
 use Firebase\JWT\JWT;
 
 $privateKey = file_get_contents('private_key.pem');
+$webhookId = 12; // Same as your target webhook ID
 
 $payload = [
-    'iss' => 'my-php-service',
+    'iss' => 'webhook-sender-app', // Webhook sender app identifier
+    'issuer_id' => $webhookId,     // Same as target webhook ID (e.g. 12)
     'aud' => 'webhook-service',
     'iat' => time(),
-    'exp' => time() + 300
+    'exp' => time() + 300          // 5 minutes validity
 ];
 
 $jwt = JWT::encode($payload, $privateKey, 'RS256');
@@ -241,12 +259,14 @@ import (
 func main() {
 	keyBytes, _ := os.ReadFile("private_key.pem")
 	privateKey, _ := jwt.ParseRSAPrivateKeyFromPEM(keyBytes)
+	webhookId := 12 // Same as your target webhook ID
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
-		"iss": "my-go-sender",
-		"aud": "webhook-service",
-		"iat": time.Now().Unix(),
-		"exp": time.Now().Add(5 * time.Minute).Unix(),
+		"iss":       "webhook-sender-app", // Webhook sender app identifier
+		"issuer_id": webhookId,            // Same as target webhook ID (e.g. 12)
+		"aud":       "webhook-service",
+		"iat":       time.Now().Unix(),
+		"exp":       time.Now().Add(5 * time.Minute).Unix(),
 	})
 
 	tokenString, _ := token.SignedString(privateKey)
@@ -275,4 +295,5 @@ func main() {
 | `401 Unauthorized` | `{"error": "Missing Authorization header", "code": "AUTH_REQUIRED"}` | Endpoint requires auth, but no `Authorization: Bearer <jwt>` was provided. |
 | `401 Unauthorized` | `{"error": "Invalid token signature: ...", "code": "INVALID_SIGNATURE"}` | The JWT was signed with the wrong private key or signature was modified. |
 | `401 Unauthorized` | `{"error": "Auth key has expired", "code": "KEY_EXPIRED"}` | The Auth Key has passed its expiration date. |
+| `401 Unauthorized` | `{"error": "Token issuer_id (5) does not match destination webhook ID (12)", "code": "ISSUER_ID_MISMATCH"}` | Token was generated for a different webhook ID. |
 | `404 Not Found` | `{"error": "Webhook not registered"}` | The endpoint identifier or secret key path does not match any registered webhook. |

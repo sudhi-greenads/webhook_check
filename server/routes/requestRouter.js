@@ -70,7 +70,7 @@ router.all('/:name/:key', async (req, res) => {
         key_fingerprint: webhook.auth_key_fingerprint
       };
 
-      const verification = authKeyService.verifyWebhookJwt(authKeyObj, token);
+      const verification = authKeyService.verifyWebhookJwt(authKeyObj, token, webhook.id);
 
       if (!verification.valid) {
         const errorResponse = { error: verification.error, code: verification.code };

@@ -68,13 +68,15 @@ const jwt = require('jsonwebtoken');
 
 // 1. Read your RSA Private Key (PEM format)
 const privateKey = fs.readFileSync('private_key.pem', 'utf8');
+const webhookId = 12; // Same as your target webhook ID
 
 // 2. Generate RS256 Signed JWT Token
 const token = jwt.sign(
   {
-    iss: 'my-nodejs-service',
-    aud: 'webhook-service',
-    iat: Math.floor(Date.now() / 1000),
+    iss: 'webhook-sender-app',               // Webhook sender application identifier
+    issuer_id: webhookId,                    // Same as target webhook ID (e.g. 12)
+    aud: 'webhook-service',                  // Target audience service
+    iat: Math.floor(Date.now() / 1000),      // Issued timestamp
     exp: Math.floor(Date.now() / 1000) + 300 // 5 minutes validity
   },
   privateKey,
@@ -126,13 +128,16 @@ import jwt
 with open("private_key.pem", "r") as key_file:
     private_key = key_file.read()
 
+webhook_id = 12  # Same as target webhook ID
+
 # 2. Build claims & sign JWT token with RS256
 now = int(time.time())
 claims = {
-    "iss": "my-python-backend",
+    "iss": "webhook-sender-app",  # Webhook sender app identifier
+    "issuer_id": webhook_id,      # Same as webhook ID (e.g. 12)
     "aud": "webhook-service",
     "iat": now,
-    "exp": now + 300  # 5 minutes expiration
+    "exp": now + 300              # 5 minutes expiration
 }
 
 token = jwt.encode(claims, private_key, algorithm="RS256")
@@ -186,12 +191,15 @@ func main() {
 		panic(err)
 	}
 
+	webhookId := 12 // Same as target webhook ID
+
 	// 2. Generate RS256 token
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
-		"iss": "my-go-service",
-		"aud": "webhook-service",
-		"iat": time.Now().Unix(),
-		"exp": time.Now().Add(5 * time.Minute).Unix(),
+		"iss":       "webhook-sender-app", // Webhook sender app identifier
+		"issuer_id": webhookId,            // Same as target webhook ID (e.g. 12)
+		"aud":       "webhook-service",
+		"iat":       time.Now().Unix(),
+		"exp":       time.Now().Add(5 * time.Minute).Unix(),
 	})
 
 	tokenString, err := token.SignedString(privateKey)
@@ -229,9 +237,11 @@ func main() {
       language: "Bash",
       code: `#!/usr/bin/env bash
 
+WEBHOOK_ID=12 # Same as your target webhook ID
+
 # 1. Base64 URL-safe encode header & payload
 HEADER=$(echo -n '{"alg":"RS256","typ":"JWT"}' | openssl base64 -e | tr -d '=' | tr '/+' '_-' | tr -d '\n')
-PAYLOAD=$(echo -n '{"iss":"cli-agent","exp":'$(( $(date +%s) + 300 ))'}' | openssl base64 -e | tr -d '=' | tr '/+' '_-' | tr -d '\n')
+PAYLOAD=$(echo -n '{"iss":"webhook-sender-app","issuer_id":'$WEBHOOK_ID',"aud":"webhook-service","exp":'$(( $(date +%s) + 300 ))'}' | openssl base64 -e | tr -d '=' | tr '/+' '_-' | tr -d '\n')
 
 # 2. Sign header + payload using OpenSSL with your RSA Private Key
 SIGNATURE=$(echo -n "\${HEADER}.\${PAYLOAD}" | openssl dgst -sha256 -sign private_key.pem | openssl base64 -e | tr -d '=' | tr '/+' '_-' | tr -d '\n')
@@ -286,10 +296,12 @@ public class WebhookSender {
 
     public static void main(String[] args) throws Exception {
         PrivateKey privateKey = loadPrivateKey("private_key.pem");
+        int webhookId = 12; // Same as target webhook ID
 
         // Generate RS256 JWT
         String token = Jwts.builder()
-            .issuer("my-java-backend")
+            .issuer("webhook-sender-app") // Webhook sender app identifier
+            .claim("issuer_id", webhookId) // Same as target webhook ID (e.g. 12)
             .audience().add("webhook-service").and()
             .issuedAt(new Date())
             .expiration(Date.from(Instant.now().plus(5, ChronoUnit.MINUTES)))
@@ -323,6 +335,7 @@ public class WebhookSender {
 // Install-Package Microsoft.IdentityModel.Tokens
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -343,12 +356,18 @@ public class WebhookService
         var securityKey = new RsaSecurityKey(rsa);
         var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.RsaSha256);
 
+        int webhookId = 12; // Same as target webhook ID
+
         // 2. Generate RS256 JWT
         var tokenHandler = new JwtSecurityTokenHandler();
         var tokenDescriptor = new SecurityTokenDescriptor
         {
-            Issuer = "my-dotnet-service",
+            Issuer = "webhook-sender-app", // Webhook sender app identifier
             Audience = "webhook-service",
+            Claims = new Dictionary<string, object>
+            {
+                { "issuer_id", webhookId } // Same as target webhook ID (e.g. 12)
+            },
             IssuedAt = DateTime.UtcNow,
             Expires = DateTime.UtcNow.AddMinutes(5),
             SigningCredentials = credentials
@@ -383,13 +402,15 @@ use Firebase\\JWT\\JWT;
 
 // 1. Read RSA Private Key
 $privateKey = file_get_contents('private_key.pem');
+$webhookId = 12; // Same as target webhook ID
 
 // 2. Generate RS256 JWT
 $payload = [
-    'iss' => 'my-php-app',
+    'iss' => 'webhook-sender-app', // Webhook sender app identifier
+    'issuer_id' => $webhookId,     // Same as target webhook ID (e.g. 12)
     'aud' => 'webhook-service',
     'iat' => time(),
-    'exp' => time() + 300 // 5 minutes validity
+    'exp' => time() + 300          // 5 minutes validity
 ];
 
 $jwt = JWT::encode($payload, $privateKey, 'RS256');
@@ -438,6 +459,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
     iss: String,
+    issuer_id: usize,
     aud: String,
     iat: usize,
     exp: usize,
@@ -448,9 +470,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let private_key_pem = std::fs::read_to_string("private_key.pem")?;
     let key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes())?;
 
+    let webhook_id = 12; // Same as target webhook ID
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as usize;
     let claims = Claims {
-        iss: "my-rust-service".to_string(),
+        iss: "webhook-sender-app".to_string(), // Webhook sender app identifier
+        issuer_id: webhook_id,                 // Same as target webhook ID (e.g. 12)
         aud: "webhook-service".to_string(),
         iat: now,
         exp: now + 300,
@@ -490,10 +514,12 @@ require 'openssl'
 
 # 1. Read RSA Private Key
 private_key = OpenSSL::PKey::RSA.new(File.read('private_key.pem'))
+webhook_id = 12 # Same as target webhook ID
 
 # 2. Generate RS256 JWT
 payload = {
-  iss: 'my-ruby-app',
+  iss: 'webhook-sender-app', # Webhook sender app identifier
+  issuer_id: webhook_id,     # Same as target webhook ID (e.g. 12)
   aud: 'webhook-service',
   iat: Time.now.to_i,
   exp: Time.now.to_i + 300
@@ -646,6 +672,35 @@ openssl rsa -pubin -in public_key.pem -outform DER | openssl dgst -sha256`
               Webhook authentication allows you to securely verify that incoming HTTP payloads originate from authorized clients. Using <strong>Asymmetric Public-Key Cryptography (RS256)</strong>, senders cryptographically sign their requests with an RSA Private Key, and our webhook listener validates the signature using the registered RSA Public Key.
             </p>
 
+            {/* ASCII Flow Diagram */}
+            <div className="rounded-xl border border-border bg-[#0d1117] p-4 text-[11.5px] font-mono text-zinc-300 overflow-x-auto select-all leading-relaxed my-4">
+              <pre className="whitespace-pre">{`┌─────────────────────────┐                                 ┌────────────────────────┐
+│      Webhook Sender     │                                 │     Webhook Server     │
+│  (Holds RSA Private Key)│                                 │ (Holds RSA Public Key) │
+└───────────┬─────────────┘                                 └───────────┬────────────┘
+            │                                                           │
+            │  1. Sign JWT with Private Key (RS256)                     │
+            │     Header: { "alg": "RS256", "typ": "JWT" }              │
+            │     Payload: {                                            │
+            │       "iss": "webhook-sender-app",                        │
+            │       "issuer_id": 12, // Same as webhook ID              │
+            │       "aud": "webhook-service",                           │
+            │       "exp": 1700000300,                                  │
+            │       "iat": 1700000000                                   │
+            │     }                                                     │
+            │                                                           │
+            │  2. HTTP POST /webhook/:name/:key                         │
+            │     Header: Authorization: Bearer <jwt_token>             │
+            │     Body: { ...event data... }                            │
+            ├──────────────────────────────────────────────────────────>│
+            │                                                           │
+            │                                                           │ 3. Verify JWT with
+            │                                                           │    stored Public Key
+            │                                                           │
+            │  4. HTTP 200 OK ('ok') or 401 Unauthorized                │
+            │<──────────────────────────────────────────────────────────┤`}</pre>
+            </div>
+
             <div className="grid md:grid-cols-3 gap-4 my-6">
               <div className="p-4 rounded-xl border border-border bg-card space-y-2">
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
@@ -698,7 +753,7 @@ openssl rsa -pubin -in public_key.pem -outform DER | openssl dgst -sha256`
                   <h3 className="text-sm font-bold text-foreground">Create an Auth Key</h3>
                 </div>
                 <p className="text-xs">
-                  Go to <Link to="/keys" className="text-primary hover:underline font-semibold">Auth Keys</Link> and click <strong>Create Auth Key</strong>. Choose <em>Auto-Generate Pair</em>. Download your <code>.pem</code> private key file.
+                  Go to <Link to="/keys/create" className="text-primary hover:underline font-semibold">Create Auth Key</Link>. Choose <em>Auto-Generate Pair</em>. Download and safely store your <code>.pem</code> private key file.
                 </p>
               </div>
 
@@ -708,7 +763,7 @@ openssl rsa -pubin -in public_key.pem -outform DER | openssl dgst -sha256`
                   <h3 className="text-sm font-bold text-foreground">Attach the Auth Key to your Webhook Endpoint</h3>
                 </div>
                 <p className="text-xs">
-                  In <Link to="/webhooks/create" className="text-primary hover:underline font-semibold">Create Endpoint</Link> or edit an existing endpoint, choose your newly created Auth Key under the <em>Authentication & Security</em> dropdown.
+                  In <Link to="/webhooks/create" className="text-primary hover:underline font-semibold">Create Endpoint</Link> or edit an existing endpoint, choose your newly created Auth Key under the <em>Authentication & Security</em> dropdown. Note the Webhook ID for your token payload.
                 </p>
               </div>
 
@@ -718,7 +773,7 @@ openssl rsa -pubin -in public_key.pem -outform DER | openssl dgst -sha256`
                   <h3 className="text-sm font-bold text-foreground">Send Requests with Authorization Header</h3>
                 </div>
                 <p className="text-xs">
-                  Sign your payload with RS256 and include the header <code>Authorization: Bearer &lt;token&gt;</code>.
+                  Sign your payload with RS256 (including <code>iss: 'webhook-sender-app'</code> and <code>issuer_id: webhookId</code>) and include the header <code>Authorization: Bearer &lt;token&gt;</code>.
                 </p>
                 <CodeShellViewer
                   title="Quick Test - Bash cURL"
@@ -799,9 +854,11 @@ openssl rsa -pubin -in public_key.pem -outform DER | openssl dgst -sha256`
             />
 
             <div className="p-4 rounded-xl bg-primary/5 border border-primary/20 text-xs text-muted-foreground">
-              <strong className="text-foreground">Recommended JWT Claims:</strong>
+              <strong className="text-foreground">Standard JWT Claims:</strong>
               <ul className="list-disc list-inside mt-1.5 space-y-1 text-muted-foreground">
-                <li><code>iss</code>: Your application identifier (e.g. <code>my-service</code>).</li>
+                <li><code>iss</code>: <code>"webhook-sender-app"</code> (Sending application identifier).</li>
+                <li><code>issuer_id</code>: <code>webhookId</code> (Same as your target webhook ID, e.g. <code>12</code>).</li>
+                <li><code>aud</code>: <code>"webhook-service"</code> (Target audience).</li>
                 <li><code>iat</code>: Unix timestamp of token issuance (e.g. <code>Math.floor(Date.now() / 1000)</code>).</li>
                 <li><code>exp</code>: Unix timestamp when token expires (typically <code>iat + 300</code> for 5 minutes).</li>
               </ul>
@@ -870,6 +927,11 @@ openssl rsa -pubin -in public_key.pem -outform DER | openssl dgst -sha256`
                     <td className="p-3 font-mono font-bold text-rose-400">401 Unauthorized</td>
                     <td className="p-3 font-mono text-muted-foreground">{"{\"error\":\"Auth key has expired\"}"}</td>
                     <td className="p-3 text-muted-foreground">The assigned Auth Key has passed its expiration date.</td>
+                  </tr>
+                  <tr>
+                    <td className="p-3 font-mono font-bold text-rose-400">401 Unauthorized</td>
+                    <td className="p-3 font-mono text-muted-foreground">{"{\"error\":\"Token issuer_id does not match...\"}"}</td>
+                    <td className="p-3 text-muted-foreground">Token was generated for a different webhook ID.</td>
                   </tr>
                   <tr>
                     <td className="p-3 font-mono font-bold text-zinc-400">404 Not Found</td>

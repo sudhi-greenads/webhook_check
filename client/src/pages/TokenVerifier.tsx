@@ -420,6 +420,14 @@ export default function TokenVerifier() {
                     <span>Issued At:</span>
                     <span className="text-foreground">{result.diagnostics.issued_at_readable}</span>
                   </div>
+                  <div className="flex items-center justify-between text-muted-foreground">
+                    <span>Issuer (iss):</span>
+                    <span className="font-mono text-foreground font-medium">{result.diagnostics.issuer}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-muted-foreground">
+                    <span>Issuer ID (issuer_id):</span>
+                    <span className="font-mono text-foreground font-medium">{result.diagnostics.issuer_id}</span>
+                  </div>
                 </div>
               )}
             </div>
