@@ -1,23 +1,31 @@
 import { useEffect, useState, useCallback } from "react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Link, useNavigate } from "react-router-dom"
-import { Activity, Plus, Trash2, Edit2, Copy, Radio, ExternalLink, RefreshCw } from "lucide-react"
+import { Activity, Plus, Trash2, Edit2, Copy, Radio, ExternalLink, RefreshCw, Lock, Unlock, Search } from "lucide-react"
 import { toast } from "sonner"
 import { apiFetch } from "../lib/api"
 import { PaginationControls } from "../components/PaginationControls"
+
+import { useConfirm } from "../contexts/ConfirmContext"
 
 type Webhook = {
   id: number
   name: string
   key: string
+  auth_key_id?: number | null
+  auth_key_name?: string | null
+  auth_key_algorithm?: string | null
   created_at: string
   log_count?: number
 }
 
 export default function WebhooksList() {
+  const { confirm } = useConfirm()
   const [webhooks, setWebhooks] = useState<Webhook[]>([])
   const [loading, setLoading] = useState(true)
   const [errorMsg, setErrorMsg] = useState("")
+  const [search, setSearch] = useState("")
 
   // Pagination
   const [page, setPage] = useState(1)
@@ -30,7 +38,12 @@ export default function WebhooksList() {
     setLoading(true)
     setErrorMsg("")
     try {
-      const res = await apiFetch(`/webhooks?page=${currentPage}&limit=${limit}`)
+      const params = new URLSearchParams()
+      params.append("page", currentPage.toString())
+      params.append("limit", limit.toString())
+      if (search) params.append("search", search)
+
+      const res = await apiFetch(`/webhooks?${params.toString()}`)
       const data = await res.json()
       if (data.data) {
         setWebhooks(data.data)
@@ -41,14 +54,20 @@ export default function WebhooksList() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [search])
 
   useEffect(() => {
     fetchWebhooks(page)
   }, [page, fetchWebhooks])
 
   const handleDelete = async (id: number, name: string) => {
-    if (!confirm(`Are you sure you want to delete endpoint "${name}"? All associated logs will be permanently removed.`)) return
+    const ok = await confirm({
+      title: "Delete Webhook Endpoint",
+      description: `Are you sure you want to delete endpoint "${name}"? All associated logs will be permanently removed.`,
+      confirmText: "Delete Endpoint",
+      variant: "destructive"
+    })
+    if (!ok) return
     
     try {
       const res = await apiFetch(`/webhooks/${id}`, { method: "DELETE" })
@@ -102,6 +121,22 @@ export default function WebhooksList() {
           </Link>
         </div>
       </div>
+
+      {/* Search & Filter Toolbar */}
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search endpoints by name, secret key, or auth..."
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value)
+              setPage(1)
+            }}
+            className="pl-8 h-9 text-xs bg-card"
+          />
+        </div>
+      </div>
       
       {errorMsg && (
         <div className="text-destructive text-xs font-medium bg-destructive/10 p-3 rounded-lg border border-destructive/20">
@@ -117,6 +152,7 @@ export default function WebhooksList() {
               <tr className="text-left font-medium text-muted-foreground">
                 <th className="h-11 px-4 align-middle text-xs font-semibold uppercase tracking-wider">Endpoint Name</th>
                 <th className="h-11 px-4 align-middle text-xs font-semibold uppercase tracking-wider">Secret Key</th>
+                <th className="h-11 px-4 align-middle text-xs font-semibold uppercase tracking-wider">Security / Auth</th>
                 <th className="h-11 px-4 align-middle text-xs font-semibold uppercase tracking-wider text-center">Total Requests</th>
                 <th className="h-11 px-4 align-middle text-xs font-semibold uppercase tracking-wider hidden md:table-cell">Created At</th>
                 <th className="h-11 px-4 align-middle text-xs font-semibold uppercase tracking-wider text-right">Actions</th>
@@ -125,7 +161,7 @@ export default function WebhooksList() {
             <tbody className="divide-y divide-border/50">
               {loading && webhooks.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="h-36 text-center text-sm text-muted-foreground">
+                  <td colSpan={6} className="h-36 text-center text-sm text-muted-foreground">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground/50" />
                       <span>Loading endpoints...</span>
@@ -134,7 +170,7 @@ export default function WebhooksList() {
                 </tr>
               ) : webhooks.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="h-48 text-center">
+                  <td colSpan={6} className="h-48 text-center">
                     <div className="flex flex-col items-center justify-center">
                       <Activity className="h-8 w-8 text-muted-foreground/30 mb-3" />
                       <p className="text-sm text-muted-foreground font-medium">No endpoints found.</p>
@@ -168,7 +204,7 @@ export default function WebhooksList() {
 
                     {/* Key with Copy button */}
                     <td className="p-4 align-middle">
-                      <div className="flex items-center gap-2 max-w-[220px]">
+                      <div className="flex items-center gap-2 max-w-[200px]">
                         <span className="font-mono text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded border border-border truncate">
                           {wh.key}
                         </span>
@@ -182,6 +218,21 @@ export default function WebhooksList() {
                           <Copy className="h-3.5 w-3.5" />
                         </Button>
                       </div>
+                    </td>
+
+                    {/* Security Badge */}
+                    <td className="p-4 align-middle">
+                      {wh.auth_key_id ? (
+                        <span className="inline-flex items-center gap-1.5 font-mono text-[11px] font-medium px-2.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 max-w-[170px] truncate" title={`Secured with ${wh.auth_key_name} (${wh.auth_key_algorithm || 'RS256'})`}>
+                          <Lock className="h-3 w-3 shrink-0" />
+                          <span className="truncate">{wh.auth_key_name}</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 font-mono text-[11px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">
+                          <Unlock className="h-3 w-3" />
+                          Public (No Auth)
+                        </span>
+                      )}
                     </td>
 
                     {/* Total Requests / Log Count Badge */}

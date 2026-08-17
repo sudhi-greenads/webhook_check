@@ -18,11 +18,25 @@ CREATE TABLE IF NOT EXISTS user_tokens (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS auth_keys (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  algorithm VARCHAR(50) DEFAULT 'RS256',
+  public_key TEXT NOT NULL,
+  key_fingerprint VARCHAR(100),
+  key_size INTEGER DEFAULT 2048,
+  expires_at TIMESTAMP NULL,
+  last_used_at TIMESTAMP DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS webhooks (
   id SERIAL PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name VARCHAR(255) NOT NULL,
   key VARCHAR(255) NOT NULL,
+  auth_key_id INTEGER REFERENCES auth_keys(id) ON DELETE SET NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(name, key)
 );
@@ -38,6 +52,9 @@ CREATE TABLE IF NOT EXISTS webhook_logs (
   ip VARCHAR(100),
   flow_ips TEXT,
   location JSONB,
+  auth_status VARCHAR(50) DEFAULT 'none',
+  response_status INTEGER DEFAULT 200,
+  response_body TEXT DEFAULT 'ok',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (webhook_id) REFERENCES webhooks(id) ON DELETE CASCADE
 );

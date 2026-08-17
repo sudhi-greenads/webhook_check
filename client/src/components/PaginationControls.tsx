@@ -40,6 +40,10 @@ export function PaginationControls({ page, totalPages, onPageChange }: Paginatio
         Prev
       </Button>
       
+      <div className="flex sm:hidden items-center px-2 text-xs text-muted-foreground font-medium">
+        Page {page} of {totalPages}
+      </div>
+
       <div className="hidden sm:flex items-center gap-1">
         {getPageNumbers().map((pageNum, idx) => 
           pageNum === -1 ? (

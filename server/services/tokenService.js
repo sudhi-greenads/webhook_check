@@ -144,15 +144,37 @@ class TokenService {
     }
 
     // Devices & Active Sessions Management
-    async getUserDevices(userId) {
-        const res = await this.db.query(
-            `SELECT id, refresh_token_id, access_token_id, user_agent, ip, flow_ips, location, created_at, last_used_at 
-             FROM user_tokens 
-             WHERE user_id = $1 
-             ORDER BY last_used_at DESC, created_at DESC`,
-            [userId]
-        );
-        return res.rows;
+    async getUserDevices(userId, page = 1, limit = 50, search = '') {
+        const offset = (page - 1) * limit;
+        let sql = `
+            SELECT id, refresh_token_id, access_token_id, user_agent, ip, flow_ips, location, created_at, last_used_at,
+                   COUNT(*) OVER() AS total_count 
+            FROM user_tokens 
+            WHERE user_id = $1
+        `;
+        const params = [userId];
+        let paramIdx = 2;
+
+        if (search && search.trim()) {
+            sql += ` AND (user_agent ILIKE $${paramIdx} OR ip ILIKE $${paramIdx} OR flow_ips ILIKE $${paramIdx} OR location::text ILIKE $${paramIdx})`;
+            params.push(`%${search.trim()}%`);
+            paramIdx++;
+        }
+
+        sql += `
+            ORDER BY last_used_at DESC, created_at DESC
+            LIMIT $${paramIdx++} OFFSET $${paramIdx++}
+        `;
+        params.push(limit, offset);
+
+        const res = await this.db.query(sql, params);
+        const total = res.rows.length > 0 ? parseInt(res.rows[0].total_count) : 0;
+        const data = res.rows.map(row => {
+            const { total_count, ...device } = row;
+            return device;
+        });
+
+        return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
     }
 
     async revokeDevice(userId, tokenId) {

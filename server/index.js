@@ -32,12 +32,14 @@ async function startServer() {
     app.use(loggerMiddleware);
 
     // 4. Mount API Routes
-
     app.use('/auth', authRouter);
+    app.use('/api/auth', authRouter);
+    app.use('/api', apiRouter);
     app.use('/', apiRouter);
 
     // 5. Catch Webhook Requests
     app.use('/webhook', requestRouter);
+    app.use('/api/webhook', requestRouter);
 
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, () => {

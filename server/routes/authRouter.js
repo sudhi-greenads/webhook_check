@@ -133,8 +133,12 @@ router.post('/regenerate-accesstoken', async (req, res) => {
 // Devices / Active Sessions Endpoints
 router.get('/devices', authMiddleware, async (req, res) => {
     try {
-        const rawDevices = await TokenService.getUserDevices(req.user.id);
-        const devices = rawDevices.map((device) => ({
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 50;
+        const search = req.query.search || '';
+
+        const result = await TokenService.getUserDevices(req.user.id, page, limit, search);
+        const devices = result.data.map((device) => ({
             id: device.id,
             user_agent: device.user_agent,
             ip: device.ip,
@@ -145,7 +149,14 @@ router.get('/devices', authMiddleware, async (req, res) => {
             is_current: device.id === req.sessionDbId || device.refresh_token_id === req.refreshTokenId
         }));
 
-        res.json({ success: true, devices });
+        res.json({
+            success: true,
+            devices,
+            total: result.total,
+            page: result.page,
+            limit: result.limit,
+            totalPages: result.totalPages
+        });
     } catch (err) {
         console.error('Fetch devices error:', err);
         res.status(500).json({ error: 'Failed to fetch active devices' });

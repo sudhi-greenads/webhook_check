@@ -28,13 +28,19 @@ async function initializeDB() {
       )
     `);
 
-    // Ensure columns exist if table was already created
     await client.query(`
-      ALTER TABLE user_tokens ADD COLUMN IF NOT EXISTS user_agent TEXT;
-      ALTER TABLE user_tokens ADD COLUMN IF NOT EXISTS ip VARCHAR(100);
-      ALTER TABLE user_tokens ADD COLUMN IF NOT EXISTS flow_ips TEXT;
-      ALTER TABLE user_tokens ADD COLUMN IF NOT EXISTS location JSONB;
-      ALTER TABLE user_tokens ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+      CREATE TABLE IF NOT EXISTS auth_keys (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name VARCHAR(255) NOT NULL,
+        algorithm VARCHAR(50) DEFAULT 'RS256',
+        public_key TEXT NOT NULL,
+        key_fingerprint VARCHAR(100),
+        key_size INTEGER DEFAULT 2048,
+        expires_at TIMESTAMP NULL,
+        last_used_at TIMESTAMP DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
     `);
 
     await client.query(`
@@ -43,6 +49,7 @@ async function initializeDB() {
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         name VARCHAR(255) NOT NULL,
         key VARCHAR(255) NOT NULL,
+        auth_key_id INTEGER REFERENCES auth_keys(id) ON DELETE SET NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(name, key)
       )
@@ -60,19 +67,26 @@ async function initializeDB() {
         ip VARCHAR(100),
         flow_ips TEXT,
         location JSONB,
+        auth_status VARCHAR(50) DEFAULT 'none',
+        response_status INTEGER DEFAULT 200,
+        response_body TEXT DEFAULT 'ok',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (webhook_id) REFERENCES webhooks(id) ON DELETE CASCADE
       )
     `);
 
-    // Ensure columns exist on webhook_logs if table was already created
+    // Ensure columns exist on already-created databases
     await client.query(`
+      ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS auth_key_id INTEGER REFERENCES auth_keys(id) ON DELETE SET NULL;
+      ALTER TABLE webhook_logs ADD COLUMN IF NOT EXISTS auth_status VARCHAR(50) DEFAULT 'none';
+      ALTER TABLE webhook_logs ADD COLUMN IF NOT EXISTS response_status INTEGER DEFAULT 200;
+      ALTER TABLE webhook_logs ADD COLUMN IF NOT EXISTS response_body TEXT DEFAULT 'ok';
       ALTER TABLE webhook_logs ADD COLUMN IF NOT EXISTS ip VARCHAR(100);
       ALTER TABLE webhook_logs ADD COLUMN IF NOT EXISTS flow_ips TEXT;
       ALTER TABLE webhook_logs ADD COLUMN IF NOT EXISTS location JSONB;
     `);
 
-    console.log("PostgreSQL Database initialized with Auth, Webhook & GeoIP schema.");
+    console.log("PostgreSQL Database initialized with Auth, Webhook, Auth Keys & GeoIP schema.");
   } catch (err) {
     console.error("Failed to initialize PostgreSQL:", err);
   } finally {
@@ -107,15 +121,15 @@ async function getUserById(id) {
 }
 
 // Webhook Methods
-async function registerWebhook(userId, name, key) {
+async function registerWebhook(userId, name, key, authKeyId = null) {
   try {
     const res = await pool.query(
-      'INSERT INTO webhooks (user_id, name, key) VALUES ($1, $2, $3) RETURNING id',
-      [userId, name, key]
+      'INSERT INTO webhooks (user_id, name, key, auth_key_id) VALUES ($1, $2, $3, $4) RETURNING id',
+      [userId, name, key, authKeyId || null]
     );
     return { success: true, id: res.rows[0].id };
   } catch (err) {
-    if (err.code === '23505') { // unique violation code
+    if (err.code === '23505') {
       return { success: false, message: 'Webhook name and key combination already exists' };
     }
     throw err;
@@ -130,24 +144,62 @@ async function verifyWebhook(name, key) {
   return res.rows.length > 0 ? res.rows[0].id : null;
 }
 
-async function getAllWebhooks(userId, page = 1, limit = 10) {
-  const offset = (page - 1) * limit;
+async function getWebhookWithAuth(name, key) {
   const res = await pool.query(
     `SELECT 
        w.id, 
+       w.user_id, 
        w.name, 
        w.key, 
+       w.auth_key_id,
+       ak.name AS auth_key_name,
+       ak.algorithm AS auth_key_algorithm,
+       ak.public_key AS auth_key_public_key,
+       ak.expires_at AS auth_key_expires_at,
+       ak.key_fingerprint AS auth_key_fingerprint
+     FROM webhooks w
+     LEFT JOIN auth_keys ak ON ak.id = w.auth_key_id
+     WHERE w.name = $1 AND w.key = $2`,
+    [name, key]
+  );
+  return res.rows[0] || null;
+}
+
+async function getAllWebhooks(userId, page = 1, limit = 10, search = '') {
+  const offset = (page - 1) * limit;
+  let sql = `
+    SELECT 
+       w.id, 
+       w.name, 
+       w.key, 
+       w.auth_key_id,
+       ak.name AS auth_key_name,
+       ak.algorithm AS auth_key_algorithm,
        w.created_at, 
        COUNT(wl.id)::int AS log_count,
        COUNT(*) OVER() AS total_count 
      FROM webhooks w
+     LEFT JOIN auth_keys ak ON ak.id = w.auth_key_id
      LEFT JOIN webhook_logs wl ON wl.webhook_id = w.id
      WHERE w.user_id = $1
-     GROUP BY w.id, w.name, w.key, w.created_at
+  `;
+  const params = [userId];
+  let paramIdx = 2;
+
+  if (search && search.trim()) {
+    sql += ` AND (w.name ILIKE $${paramIdx} OR w.key ILIKE $${paramIdx} OR ak.name ILIKE $${paramIdx})`;
+    params.push(`%${search.trim()}%`);
+    paramIdx++;
+  }
+
+  sql += `
+     GROUP BY w.id, w.name, w.key, w.auth_key_id, ak.name, ak.algorithm, w.created_at
      ORDER BY w.created_at DESC 
-     LIMIT $2 OFFSET $3`,
-    [userId, limit, offset]
-  );
+     LIMIT $${paramIdx++} OFFSET $${paramIdx++}
+  `;
+  params.push(limit, offset);
+
+  const res = await pool.query(sql, params);
   
   const total = res.rows.length > 0 ? parseInt(res.rows[0].total_count) : 0;
   const data = res.rows.map(row => {
@@ -160,7 +212,16 @@ async function getAllWebhooks(userId, page = 1, limit = 10) {
 
 async function getWebhookById(id, userId) {
   const res = await pool.query(
-    'SELECT id, name, key, created_at FROM webhooks WHERE id = $1 AND user_id = $2',
+    `SELECT 
+       w.id, 
+       w.name, 
+       w.key, 
+       w.auth_key_id,
+       ak.name AS auth_key_name,
+       w.created_at 
+     FROM webhooks w
+     LEFT JOIN auth_keys ak ON ak.id = w.auth_key_id
+     WHERE w.id = $1 AND w.user_id = $2`,
     [id, userId]
   );
   return res.rows[0] || null;
@@ -176,11 +237,14 @@ async function getWebhookIdByNameKey(name, key) {
   return res.rows[0];
 }
 
-async function updateWebhook(id, userId, name, key) {
+async function updateWebhook(id, userId, name, key, authKeyId = null) {
   try {
     const res = await pool.query(
-      'UPDATE webhooks SET name = $1, key = $2 WHERE id = $3 AND user_id = $4 RETURNING *',
-      [name, key, id, userId]
+      `UPDATE webhooks 
+       SET name = $1, key = $2, auth_key_id = $3 
+       WHERE id = $4 AND user_id = $5 
+       RETURNING *`,
+      [name, key, authKeyId || null, id, userId]
     );
     if (res.rows.length === 0) throw new Error('Webhook not found or unauthorized');
     return { success: true, webhook: res.rows[0] };
@@ -198,10 +262,25 @@ async function deleteWebhook(id, userId) {
 }
 
 // Logging Methods
-async function logWebhookEvent(webhookId, method, url, headers, query, body, ip = null, flow_ips = null, location = null) {
+async function logWebhookEvent(
+  webhookId, 
+  method, 
+  url, 
+  headers, 
+  query, 
+  body, 
+  ip = null, 
+  flow_ips = null, 
+  location = null, 
+  authStatus = 'none', 
+  responseStatus = 200, 
+  responseBody = 'ok'
+) {
   const res = await pool.query(
-    `INSERT INTO webhook_logs (webhook_id, method, url, headers, query, body, ip, flow_ips, location) 
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+    `INSERT INTO webhook_logs (
+       webhook_id, method, url, headers, query, body, ip, flow_ips, location, auth_status, response_status, response_body
+     ) 
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
     [
       webhookId,
       method,
@@ -211,7 +290,10 @@ async function logWebhookEvent(webhookId, method, url, headers, query, body, ip 
       JSON.stringify(body || {}),
       ip || null,
       flow_ips || null,
-      location ? JSON.stringify(location) : null
+      location ? JSON.stringify(location) : null,
+      authStatus,
+      responseStatus,
+      typeof responseBody === 'object' ? JSON.stringify(responseBody) : String(responseBody)
     ]
   );
   return res.rows[0].id;
@@ -227,8 +309,21 @@ async function getWebhookLogs(webhookId, filters = {}, page = 1, limit = 100) {
     params.push(filters.method.toUpperCase());
   }
 
+  if (filters.authStatus && filters.authStatus !== 'ALL') {
+    sql += ` AND auth_status = $${paramIndex++}`;
+    params.push(filters.authStatus.toLowerCase());
+  }
+
   if (filters.search) {
-    sql += ` AND (headers::TEXT ILIKE $${paramIndex} OR body::TEXT ILIKE $${paramIndex} OR query::TEXT ILIKE $${paramIndex} OR url ILIKE $${paramIndex} OR ip ILIKE $${paramIndex} OR location::TEXT ILIKE $${paramIndex})`;
+    sql += ` AND (
+      headers::TEXT ILIKE $${paramIndex} OR 
+      body::TEXT ILIKE $${paramIndex} OR 
+      query::TEXT ILIKE $${paramIndex} OR 
+      url ILIKE $${paramIndex} OR 
+      ip ILIKE $${paramIndex} OR 
+      location::TEXT ILIKE $${paramIndex} OR
+      response_body ILIKE $${paramIndex}
+    )`;
     const searchStr = `%${filters.search}%`;
     params.push(searchStr);
     paramIndex++;
@@ -273,6 +368,7 @@ module.exports = {
   getUserById,
   registerWebhook,
   verifyWebhook,
+  getWebhookWithAuth,
   getAllWebhooks,
   getWebhookById,
   getWebhookOwner,
