@@ -22,7 +22,7 @@ import {
   Cpu
 } from "lucide-react"
 import { DOCS_CATEGORIES, ALL_DOC_PAGES } from "../lib/docsData"
-import { CodeShellViewer, CodeTab } from "../components/CodeShellViewer"
+import { CodeShellViewer, type CodeTab } from "../components/CodeShellViewer"
 
 export default function Docs() {
   const { docId } = useParams<{ docId?: string }>()
