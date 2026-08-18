@@ -19,6 +19,7 @@ import {
 } from "lucide-react"
 import { apiFetch } from "../lib/api"
 import { useAuth } from "../contexts/AuthContext"
+import { useConfirm } from "../contexts/ConfirmContext"
 import { PaginationControls } from "../components/PaginationControls"
 
 type DeviceSession = {

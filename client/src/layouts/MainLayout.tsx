@@ -14,6 +14,7 @@ import {
 } from "lucide-react"
 import { useAuth } from "../contexts/AuthContext"
 import { Sidebar } from "../components/Sidebar"
+import { ErrorBoundary } from "../components/ErrorBoundary"
 import { Button } from "@/components/ui/button"
 
 export function MainLayout() {
@@ -134,7 +135,9 @@ export function MainLayout() {
 
         {/* Page Body Container */}
         <main className="flex-1 p-4 sm:p-6 md:p-8 max-w-[1600px] w-full mx-auto">
-          <Outlet />
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>

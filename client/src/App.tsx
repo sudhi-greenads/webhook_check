@@ -15,6 +15,7 @@ import Devices from "./pages/Devices"
 import Login from "./pages/Login"
 import Register from "./pages/Register"
 import { Toaster } from "sonner"
+import { ErrorBoundary } from "./components/ErrorBoundary"
 
 function ProtectedRoutes() {
   const { isAuthenticated, isLoading } = useAuth()
@@ -25,31 +26,33 @@ function ProtectedRoutes() {
 export function App() {
   return (
     <BrowserRouter>
-      <ConfirmProvider>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          
-          <Route element={<ProtectedRoutes />}>
-            <Route path="/" element={<MainLayout />}>
-              <Route index element={<Navigate to="/webhooks" replace />} />
-              <Route path="webhooks" element={<WebhooksList />} />
-              <Route path="webhooks/create" element={<CreateWebhook />} />
-              <Route path="webhooks/:id/edit" element={<EditWebhook />} />
-              <Route path="keys" element={<AuthKeysList />} />
-              <Route path="keys/create" element={<CreateAuthKey />} />
-              <Route path="keys/:id" element={<AuthKeyDetail />} />
-              <Route path="keys/verify" element={<TokenVerifier />} />
-              <Route path="verify-token" element={<TokenVerifier />} />
-              <Route path="devices" element={<Devices />} />
-              <Route path="docs" element={<Docs />} />
-              <Route path="docs/:docId" element={<Docs />} />
-              <Route path="logs/:name/:key" element={<Logs />} />
+      <ErrorBoundary>
+        <ConfirmProvider>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            
+            <Route element={<ProtectedRoutes />}>
+              <Route path="/" element={<MainLayout />}>
+                <Route index element={<Navigate to="/webhooks" replace />} />
+                <Route path="webhooks" element={<WebhooksList />} />
+                <Route path="webhooks/create" element={<CreateWebhook />} />
+                <Route path="webhooks/:id/edit" element={<EditWebhook />} />
+                <Route path="keys" element={<AuthKeysList />} />
+                <Route path="keys/create" element={<CreateAuthKey />} />
+                <Route path="keys/:id" element={<AuthKeyDetail />} />
+                <Route path="keys/verify" element={<TokenVerifier />} />
+                <Route path="verify-token" element={<TokenVerifier />} />
+                <Route path="devices" element={<Devices />} />
+                <Route path="docs" element={<Docs />} />
+                <Route path="docs/:docId" element={<Docs />} />
+                <Route path="logs/:name/:key" element={<Logs />} />
+              </Route>
             </Route>
-          </Route>
-        </Routes>
-        <Toaster theme="dark" position="bottom-right" richColors />
-      </ConfirmProvider>
+          </Routes>
+          <Toaster theme="dark" position="bottom-right" richColors />
+        </ConfirmProvider>
+      </ErrorBoundary>
     </BrowserRouter>
   )
 }
